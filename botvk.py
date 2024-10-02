@@ -1,49 +1,69 @@
+import subprocess
 from PIL import Image
 
 
 def calculate_toner_usage(image_path):
-    image = Image.open(image_path)
-    pixels = image.load()
+    # Преобразуем изображение в формат CIE LAB для определения цветовой составляющей
+    # Используем ImageMagick для конвертации
+    output_path = "white-cat.jpg"
+    subprocess.run(["convert", image_path, "-colorspace", "RGB", output_path])
 
-    width, height = image.size
+    # Загружаем изображение с помощью Pillow
+    img = Image.open(output_path)
+    width, height = img.size
     total_pixels = width * height
 
-    color_usage = {'black': 0, 'cyan': 0, 'magenta': 0, 'yellow': 0}
+    # Считаем количество пикселей для каждого цвета
+    c_count = m_count = y_count = k_count = 0
 
-    for i in range(width):
-        for j in range(height):
-            r, g, b = pixels[i, j]
+    for pixel in img.getdata():
+        r, g, b = pixel
 
-            # Расчет количества каждого цвета на изображении
-            if r + g + b < 182:  # черный
-                color_usage['black'] += 1
-            elif r > 200 and g < 50 and b < 50:  # маджента
-                color_usage['magenta'] += 1
-            elif r < 50 and g > 200 and b < 50:  # циан
-                color_usage['cyan'] += 1
-            elif r < 50 and g < 50 and b > 200:  # желтый
-                color_usage['yellow'] += 1
+        # Преобразуем RGB в CMYK
+        c = 1 - (r / 255.0)
+        m = 1 - (g / 255.0)
+        y = 1 - (b / 255.0)
+        k = min(c, m, y)
 
-    # Расчет процента использования тонера
-    for color in color_usage:
-        color_usage[color] = round((color_usage[color] / total_pixels) * 100, 2)
+        if k < 1:  # игнорируем полностью черные пиксели
+            c = (c - k) / (1 - k)
+            m = (m - k) / (1 - k)
+            y = (y - k) / (1 - k)
 
-    return color_usage
+        c_count += round(c * 100)
+        m_count += round(m * 100)
+        y_count += round(y * 100)
+        k_count += round(k * 100)
+
+    # Рассчитываем процентные соотношения
+    c_usage = c_count / total_pixels
+    m_usage = m_count / total_pixels
+    y_usage = y_count / total_pixels
+    k_usage = k_count / total_pixels
+
+    return c_usage, m_usage, y_usage, k_usage
 
 
-def calculate_cost(cartridge_costs, toner_usage):
-    total_cost = 0
-    for color in toner_usage:
-        total_cost += (toner_usage[color] / 100) * cartridge_costs[color]
+def calculate_print_cost(tone_usage, toner_costs):
+    c_usage, m_usage, y_usage, k_usage = tone_usage
+    c_cost, m_cost, y_cost, k_cost = toner_costs
+
+    total_cost = (c_usage * c_cost) + (m_usage * m_cost) + (y_usage * y_cost) + (k_usage * k_cost)
     return total_cost
 
 
-# Пример использования
-cartridge_costs = {'black': 50, 'cyan': 45, 'magenta': 45, 'yellow': 45}
-image_path = 'white-cat.jpg'
+if __name__ == "__main__":
+    image_path = input("Введите путь к изображению: ")
+    c_cost = float(input("Введите стоимость картриджа Cyan: "))
+    m_cost = float(input("Введите стоимость картриджа Magenta: "))
+    y_cost = float(input("Введите стоимость картриджа Yellow: "))
+    k_cost = float(input("Введите стоимость картриджа Black: "))
 
-toner_usage = calculate_toner_usage(image_path)
-total_cost = calculate_cost(cartridge_costs, toner_usage)
+    toner_costs = (c_cost, m_cost, y_cost, k_cost)
 
-print(f'Использование тонера: {toner_usage}')
-print(f'Общая стоимость печати: {total_cost}')
+    toner_usage = calculate_toner_usage(image_path)
+    print(
+        f"Расход тонера: C: {toner_usage[0] * 100:.2f}%, M: {toner_usage[1] * 100:.2f}%, Y: {toner_usage[2] * 100:.2f}%, K: {toner_usage[3] * 100:.2f}%")
+
+    total_cost = calculate_print_cost(toner_usage, toner_costs)
+    print(f"Стоимость печати: {total_cost:.2f} руб.")
